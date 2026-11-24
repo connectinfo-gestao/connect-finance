@@ -22,7 +22,7 @@ def headers(r):
         r.headers['Access-Control-Allow-Methods']='GET, PUT, POST, OPTIONS'
     r.headers['X-Content-Type-Options']='nosniff'; r.headers['Referrer-Policy']='no-referrer'; r.headers['X-Frame-Options']='DENY'; r.headers['Cache-Control']='no-store'; r.headers['Vary']='Origin'; return r
 @app.get('/')
-def index(): return jsonify(app='Connect Finance',version='3.0-rc',sync=bool(EMAIL and HASH))
+def index(): return jsonify(app='Connect Finance',version='3.1-rc',sync=bool(EMAIL and HASH))
 @app.get('/health')
 def health():
     try:
@@ -63,16 +63,16 @@ def logout():
 @app.route('/state',methods=['GET','PUT'])
 def state():
     with db() as c:
-        schema(c)
         if not auth(c): return jsonify(error='Faça login'),401
         if request.method=='GET':
             r=c.execute('SELECT revision,data FROM cf_state WHERE id=1').fetchone(); return jsonify(revision=r[0],data=r[1]) if r else jsonify(revision=0,data=None)
         j=request.get_json(silent=True) or {};
         if not isinstance(j,dict): return jsonify(error='Dados inválidos'),400
         d=j.get('data'); rev=j.get('revision')
-        if type(rev)!=int or not isinstance(d,dict) or set(d)!=KEYS or any(not isinstance(v,dict if k.endswith('categories-v1') else list) for k,v in d.items()): return jsonify(error='Dados inválidos'),400
+        if type(rev)!=int or rev<0 or not isinstance(d,dict) or set(d)!=KEYS or any(not isinstance(v,dict if k.endswith('categories-v1') else list) for k,v in d.items()): return jsonify(error='Dados inválidos'),400
         c.execute('SELECT pg_advisory_xact_lock(2525)'); r=c.execute('SELECT revision,data FROM cf_state WHERE id=1').fetchone(); current=r[0] if r else 0
         if rev!=current: return jsonify(error='Conflito de versões'),409
+        if r and r[1]==d: return jsonify(revision=current)
         if r: c.execute('INSERT INTO cf_history(revision,data) VALUES (%s,%s) ON CONFLICT DO NOTHING',(current,Jsonb(r[1])))
         c.execute('INSERT INTO cf_state VALUES (1,%s,%s) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,data=excluded.data',(current+1,Jsonb(d)))
         return jsonify(revision=current+1)
