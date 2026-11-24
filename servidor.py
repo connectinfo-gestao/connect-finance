@@ -19,9 +19,9 @@ def headers(r):
         r.headers['Access-Control-Allow-Origin']=ORIGIN
         r.headers['Access-Control-Allow-Headers']='Authorization, Content-Type'
         r.headers['Access-Control-Allow-Methods']='GET, PUT, POST, OPTIONS'
-    r.headers['X-Content-Type-Options']='nosniff'; r.headers['Cache-Control']='no-store'; r.headers['Vary']='Origin'; return r
+    r.headers['X-Content-Type-Options']='nosniff'; r.headers['Referrer-Policy']='no-referrer'; r.headers['X-Frame-Options']='DENY'; r.headers['Cache-Control']='no-store'; r.headers['Vary']='Origin'; return r
 @app.get('/')
-def index(): return jsonify(app='Connect Finance',version='2.6-homologacao-sync',sync=bool(EMAIL and HASH))
+def index(): return jsonify(app='Connect Finance',version='2.7-homologacao-sync',sync=bool(EMAIL and HASH))
 @app.get('/health')
 def health():
     try:
@@ -33,7 +33,9 @@ def schema(c):
     c.execute('CREATE TABLE IF NOT EXISTS cf_state (id integer PRIMARY KEY, revision bigint NOT NULL, data jsonb NOT NULL)')
     c.execute('CREATE TABLE IF NOT EXISTS cf_history (revision bigint PRIMARY KEY, data jsonb NOT NULL, saved timestamptz DEFAULT now())')
 def auth(c):
-    t=request.headers.get('Authorization','').removeprefix('Bearer ')
+    header=request.headers.get('Authorization','')
+    if not header.startswith('Bearer '): return False
+    t=header[7:]
     return len(t)==64 and c.execute('SELECT 1 FROM cf_sessions WHERE token=%s AND expires>now()',(digest(t),)).fetchone()
 @app.post('/login')
 def login():
