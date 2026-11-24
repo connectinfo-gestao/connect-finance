@@ -10,6 +10,7 @@ KEYS={'connect-finance-'+x+'-v1' for x in ('local','cards','categories','account
 EMAIL=os.getenv('FINANCE_EMAIL','').strip().lower()
 PASSWORD=os.getenv('FINANCE_PASSWORD','')
 HASH=generate_password_hash(PASSWORD) if len(PASSWORD)>=16 else None
+SCOPE=hashlib.sha256(('cf-session-v3:'+EMAIL+'\0'+PASSWORD).encode()).hexdigest()
 attempts=[]; mutex=threading.Lock()
 def db(): return psycopg.connect(os.environ['DATABASE_URL'],connect_timeout=8)
 def digest(t): return hashlib.sha256(t.encode()).hexdigest()
@@ -21,7 +22,7 @@ def headers(r):
         r.headers['Access-Control-Allow-Methods']='GET, PUT, POST, OPTIONS'
     r.headers['X-Content-Type-Options']='nosniff'; r.headers['Referrer-Policy']='no-referrer'; r.headers['X-Frame-Options']='DENY'; r.headers['Cache-Control']='no-store'; r.headers['Vary']='Origin'; return r
 @app.get('/')
-def index(): return jsonify(app='Connect Finance',version='2.7-homologacao-sync',sync=bool(EMAIL and HASH))
+def index(): return jsonify(app='Connect Finance',version='3.0-rc',sync=bool(EMAIL and HASH))
 @app.get('/health')
 def health():
     try:
@@ -30,13 +31,14 @@ def health():
     except Exception: return jsonify(status='unavailable'),503
 def schema(c):
     c.execute('CREATE TABLE IF NOT EXISTS cf_sessions (token text PRIMARY KEY, expires timestamptz NOT NULL)')
+    c.execute('ALTER TABLE cf_sessions ADD COLUMN IF NOT EXISTS scope text')
     c.execute('CREATE TABLE IF NOT EXISTS cf_state (id integer PRIMARY KEY, revision bigint NOT NULL, data jsonb NOT NULL)')
     c.execute('CREATE TABLE IF NOT EXISTS cf_history (revision bigint PRIMARY KEY, data jsonb NOT NULL, saved timestamptz DEFAULT now())')
 def auth(c):
     header=request.headers.get('Authorization','')
     if not header.startswith('Bearer '): return False
     t=header[7:]
-    return len(t)==64 and c.execute('SELECT 1 FROM cf_sessions WHERE token=%s AND expires>now()',(digest(t),)).fetchone()
+    return len(t)==64 and c.execute('SELECT 1 FROM cf_sessions WHERE token=%s AND expires>now() AND scope=%s',(digest(t),SCOPE)).fetchone()
 @app.post('/login')
 def login():
     if not EMAIL or not HASH: return jsonify(error='Login não configurado'),503
@@ -50,11 +52,12 @@ def login():
     if not isinstance(p,str) or len(p)>256 or not isinstance(e,str) or not check_password_hash(HASH,p) or e.strip().lower()!=EMAIL: return jsonify(error='Credenciais inválidas'),401
     t=secrets.token_hex(32)
     with db() as c:
-        schema(c); c.execute('DELETE FROM cf_sessions WHERE expires<=now()'); c.execute("INSERT INTO cf_sessions VALUES (%s,now()+interval '8 hours')",(digest(t),))
+        schema(c); c.execute('DELETE FROM cf_sessions WHERE expires<=now()'); c.execute("INSERT INTO cf_sessions(token,expires,scope) VALUES (%s,now()+interval '8 hours',%s)",(digest(t),SCOPE))
     return jsonify(token=t)
 @app.post('/logout')
 def logout():
     with db() as c:
+        schema(c)
         if auth(c): c.execute('DELETE FROM cf_sessions WHERE token=%s',(digest(request.headers['Authorization'].removeprefix('Bearer ')),))
     return jsonify(ok=True)
 @app.route('/state',methods=['GET','PUT'])
