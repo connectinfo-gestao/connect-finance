@@ -19,9 +19,9 @@ def headers(r):
         r.headers['Access-Control-Allow-Origin']=ORIGIN
         r.headers['Access-Control-Allow-Headers']='Authorization, Content-Type'
         r.headers['Access-Control-Allow-Methods']='GET, PUT, POST, OPTIONS'
-    r.headers['Cache-Control']='no-store'; r.headers['Vary']='Origin'; return r
+    r.headers['X-Content-Type-Options']='nosniff'; r.headers['Cache-Control']='no-store'; r.headers['Vary']='Origin'; return r
 @app.get('/')
-def index(): return jsonify(app='Connect Finance',version='2.5-homologacao-sync',sync=bool(EMAIL and HASH))
+def index(): return jsonify(app='Connect Finance',version='2.6-homologacao-sync',sync=bool(EMAIL and HASH))
 @app.get('/health')
 def health():
     try:
@@ -42,7 +42,9 @@ def login():
         now=time.monotonic(); attempts[:]=[x for x in attempts if now-x<60]
         if len(attempts)>=8: return jsonify(error='Aguarde um minuto'),429
         attempts.append(now)
-    j=request.get_json(silent=True) or {}; p=j.get('password',''); e=j.get('email','')
+    j=request.get_json(silent=True) or {};
+    if not isinstance(j,dict): return jsonify(error='Dados inválidos'),400
+    p=j.get('password',''); e=j.get('email','')
     if not isinstance(p,str) or len(p)>256 or not isinstance(e,str) or not check_password_hash(HASH,p) or e.strip().lower()!=EMAIL: return jsonify(error='Credenciais inválidas'),401
     t=secrets.token_hex(32)
     with db() as c:
@@ -60,7 +62,9 @@ def state():
         if not auth(c): return jsonify(error='Faça login'),401
         if request.method=='GET':
             r=c.execute('SELECT revision,data FROM cf_state WHERE id=1').fetchone(); return jsonify(revision=r[0],data=r[1]) if r else jsonify(revision=0,data=None)
-        j=request.get_json(silent=True) or {}; d=j.get('data'); rev=j.get('revision')
+        j=request.get_json(silent=True) or {};
+        if not isinstance(j,dict): return jsonify(error='Dados inválidos'),400
+        d=j.get('data'); rev=j.get('revision')
         if type(rev)!=int or not isinstance(d,dict) or set(d)!=KEYS or any(not isinstance(v,dict if k.endswith('categories-v1') else list) for k,v in d.items()): return jsonify(error='Dados inválidos'),400
         c.execute('SELECT pg_advisory_xact_lock(2525)'); r=c.execute('SELECT revision,data FROM cf_state WHERE id=1').fetchone(); current=r[0] if r else 0
         if rev!=current: return jsonify(error='Conflito de versões'),409
